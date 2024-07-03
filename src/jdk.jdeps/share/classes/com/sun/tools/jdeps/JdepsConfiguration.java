@@ -62,6 +62,10 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.function.Function;
 import java.util.function.Supplier;
+import java.util.jar.Attributes;
+import java.util.jar.JarFile;
+import java.util.jar.Manifest;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
@@ -443,6 +447,9 @@ public class JdepsConfiguration implements AutoCloseable {
 
     public static class Builder {
 
+        private static final Pattern SPACE = Pattern.compile("\\s");
+        private final Set<Path> jarPaths = new HashSet<>();
+
         final SystemModuleFinder systemModulePath;
         final Set<String> rootModules = new HashSet<>();
         final List<Archive> initialArchives = new ArrayList<>();
@@ -602,17 +609,50 @@ public class JdepsConfiguration implements AutoCloseable {
                         Path dir = Paths.get(p.substring(0, i));
                         try (DirectoryStream<Path> stream = Files.newDirectoryStream(dir, "*.jar")) {
                             for (Path entry : stream) {
-                                paths.add(entry);
+                                paths.addAll(getJarPaths(entry));
                             }
                         } catch (IOException e) {
                             throw new UncheckedIOException(e);
                         }
                     } else {
-                        paths.add(Paths.get(p));
+                        paths.addAll(getJarPaths(Paths.get(p)));
                     }
                 }
             }
             return paths;
+        }
+
+        private List<Path> getJarPaths(Path jarPath) {
+            List<Path> files = new ArrayList<>();
+            files.add(jarPath);
+            jarPaths.add(jarPath);
+
+            Path parent = jarPath.getParent();
+
+            try (JarFile rf = new JarFile(jarPath.toFile())) {
+                Manifest man = rf.getManifest();
+                if (man != null) {
+                    Attributes attr = man.getMainAttributes();
+                    if (attr != null) {
+                        String value = attr.getValue(Attributes.Name.CLASS_PATH);
+                        if (value != null) {
+                            for (final String classPathEntry : SPACE.split(value)) {
+                                if (!classPathEntry.endsWith("/")) {  // it is a jar file
+                                    Path ajar = parent.resolve(classPathEntry);
+                                    /* check on cyclic dependency */
+                                    if (!jarPaths.contains(ajar)) {
+                                        files.addAll(getJarPaths(ajar));
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            } catch (IOException e) {
+                throw new UncheckedIOException(e);
+            }
+
+            return files;
         }
     }
 
