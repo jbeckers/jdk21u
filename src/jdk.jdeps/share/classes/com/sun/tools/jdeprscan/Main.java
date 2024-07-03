@@ -28,6 +28,7 @@ package com.sun.tools.jdeprscan;
 import java.io.File;
 import java.io.IOException;
 import java.io.PrintStream;
+import java.io.UncheckedIOException;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -45,6 +46,9 @@ import java.util.Map;
 import java.util.NoSuchElementException;
 import java.util.Set;
 import java.util.Queue;
+import java.util.jar.Attributes;
+import java.util.jar.Manifest;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 import java.util.stream.Stream;
@@ -96,6 +100,9 @@ import javax.lang.model.element.TypeElement;
  *  - multi-version jar
  */
 public class Main implements DiagnosticListener<JavaFileObject> {
+    private static final Pattern SPACE = Pattern.compile("\\s");
+    private final Set<Path> jarPaths = new HashSet<>();
+
     final PrintStream out;
     final PrintStream err;
     final List<File> bootClassPath = new ArrayList<>();
@@ -514,8 +521,10 @@ public class Main implements DiagnosticListener<JavaFileObject> {
                         case "--class-path":
                             classPath.clear();
                             Arrays.stream(args.remove().split(File.pathSeparator))
-                                  .map(File::new)
-                                  .forEachOrdered(classPath::add);
+                                    .map(Paths::get)
+                                    .flatMap(path -> getJarPaths(path).stream())
+                                    .map(Path::toFile)
+                                    .forEachOrdered(classPath::add);
                             break;
                         case "--for-removal":
                             forRemoval = true;
@@ -697,6 +706,39 @@ public class Main implements DiagnosticListener<JavaFileObject> {
         }
 
         return scanStatus;
+    }
+
+    private List<Path> getJarPaths(Path jarPath) {
+        List<Path> files = new ArrayList<>();
+        files.add(jarPath);
+        jarPaths.add(jarPath);
+
+        Path parent = jarPath.getParent();
+
+        try (JarFile rf = new JarFile(jarPath.toFile())) {
+            Manifest man = rf.getManifest();
+            if (man != null) {
+                Attributes attr = man.getMainAttributes();
+                if (attr != null) {
+                    String value = attr.getValue(Attributes.Name.CLASS_PATH);
+                    if (value != null) {
+                        for (final String classPathEntry : SPACE.split(value)) {
+                            if (!classPathEntry.endsWith("/")) {  // it is a jar file
+                                Path ajar = parent.resolve(classPathEntry);
+                                /* check on cyclic dependency */
+                                if (!jarPaths.contains(ajar)) {
+                                    files.addAll(getJarPaths(ajar));
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
+
+        return files;
     }
 
     private void printHelp(PrintStream out) {
