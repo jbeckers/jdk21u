@@ -589,7 +589,7 @@ class JdepsTask {
                .addmods(command.addModules());
 
         if (options.classpath != null)
-            builder.addClassPath(options.classpath);
+            builder.addClassPath(options.classpath, (IOException ioe) -> warning("warn.invalid.arg", ioe.toString()));
 
         if (options.multiRelease != null)
             builder.multiRelease(options.multiRelease);

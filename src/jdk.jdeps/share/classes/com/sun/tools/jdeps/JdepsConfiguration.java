@@ -60,6 +60,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.function.Supplier;
 import java.util.jar.Attributes;
@@ -507,8 +508,8 @@ public class JdepsConfiguration implements AutoCloseable {
             return this;
         }
 
-        public Builder addClassPath(String classPath) {
-            this.classPaths.addAll(getClassPaths(classPath));
+        public Builder addClassPath(String classPath, Consumer<IOException> warner) {
+            this.classPaths.addAll(getClassPaths(classPath, warner));
             return this;
         }
 
@@ -596,7 +597,7 @@ public class JdepsConfiguration implements AutoCloseable {
          * Returns the list of Archive specified in cpaths and not included
          * initialArchives
          */
-        private List<Path> getClassPaths(String cpaths) {
+        private List<Path> getClassPaths(String cpaths, Consumer<IOException> warner) {
             if (cpaths.isEmpty()) {
                 return Collections.emptyList();
             }
@@ -609,20 +610,20 @@ public class JdepsConfiguration implements AutoCloseable {
                         Path dir = Paths.get(p.substring(0, i));
                         try (DirectoryStream<Path> stream = Files.newDirectoryStream(dir, "*.jar")) {
                             for (Path entry : stream) {
-                                paths.addAll(getJarPaths(entry));
+                                paths.addAll(getJarPaths(entry, warner));
                             }
                         } catch (IOException e) {
-                            throw new UncheckedIOException(e);
+                            warner.accept(e);
                         }
                     } else {
-                        paths.addAll(getJarPaths(Paths.get(p)));
+                        paths.addAll(getJarPaths(Paths.get(p), warner));
                     }
                 }
             }
             return paths;
         }
 
-        private List<Path> getJarPaths(Path jarPath) {
+        private List<Path> getJarPaths(Path jarPath, Consumer<IOException> warner) {
             List<Path> files = new ArrayList<>();
             files.add(jarPath);
             jarPaths.add(jarPath);
@@ -641,7 +642,7 @@ public class JdepsConfiguration implements AutoCloseable {
                                     Path ajar = parent.resolve(classPathEntry);
                                     /* check on cyclic dependency */
                                     if (!jarPaths.contains(ajar)) {
-                                        files.addAll(getJarPaths(ajar));
+                                        files.addAll(getJarPaths(ajar, warner));
                                     }
                                 }
                             }
@@ -649,7 +650,7 @@ public class JdepsConfiguration implements AutoCloseable {
                     }
                 }
             } catch (IOException e) {
-                throw new UncheckedIOException(e);
+                warner.accept(e);
             }
 
             return files;
