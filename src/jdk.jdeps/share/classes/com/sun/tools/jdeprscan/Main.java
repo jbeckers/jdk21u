@@ -28,7 +28,6 @@ package com.sun.tools.jdeprscan;
 import java.io.File;
 import java.io.IOException;
 import java.io.PrintStream;
-import java.io.UncheckedIOException;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.DirectoryStream;
@@ -758,8 +757,12 @@ public class Main implements DiagnosticListener<JavaFileObject> {
                     }
                 }
             }
-        } catch (IOException e) {
-            throw new UncheckedIOException(e);
+        } catch (IOException ioe) {
+            if (verbose) {
+                ioe.printStackTrace(err);
+            } else {
+                err.println(ioe);
+            }
         }
 
         return files;
