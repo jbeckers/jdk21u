@@ -31,6 +31,7 @@ import java.io.PrintStream;
 import java.io.UncheckedIOException;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.DirectoryStream;
 import java.nio.file.Files;
 import java.nio.file.FileSystems;
 import java.nio.file.Path;
@@ -521,7 +522,8 @@ public class Main implements DiagnosticListener<JavaFileObject> {
                         case "--class-path":
                             classPath.clear();
                             Arrays.stream(args.remove().split(File.pathSeparator))
-                                    .map(Paths::get)
+                                    .filter(s -> !s.isEmpty())
+                                    .flatMap(this::streamPathOrWildcardPath)
                                     .flatMap(path -> getJarPaths(path).stream())
                                     .map(Path::toFile)
                                     .forEachOrdered(classPath::add);
@@ -706,6 +708,28 @@ public class Main implements DiagnosticListener<JavaFileObject> {
         }
 
         return scanStatus;
+    }
+
+    private Stream<Path> streamPathOrWildcardPath(String path) {
+        // wildcard to parse all JAR files e.g. -classpath dir/*
+        final int i = path.lastIndexOf(".*");
+        if (i <= 0) {
+            return Stream.of(Paths.get(path));
+        }
+        Path wildcardDir = Paths.get(path.substring(0, i));
+        List<Path> paths = new ArrayList<>();
+        try (DirectoryStream<Path> stream = Files.newDirectoryStream(wildcardDir, "*.jar")) {
+            for (Path entry : stream) {
+                paths.add(entry);
+            }
+        } catch (IOException ioe) {
+            if (verbose) {
+                ioe.printStackTrace(err);
+            } else {
+                err.println(ioe);
+            }
+        }
+        return paths.stream();
     }
 
     private List<Path> getJarPaths(Path jarPath) {
